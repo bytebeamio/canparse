@@ -1,5 +1,6 @@
 use crate::dbc;
 use std::collections::HashMap;
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 
 /// Trait for converting `Entry` values into a library's own entries.
 pub trait FromDbc {
@@ -13,6 +14,31 @@ pub trait FromDbc {
     /// Merges the given `Entity` with a `mut` version of the library's entity.  Useful for when
     /// multiple `Entry` types contribute to various attributes within the same destination.
     fn merge_entry(&mut self, entry: dbc::Entry) -> Result<(), Self::Err>;
+}
+
+/// Internal function for parsing CAN message slices given the definition parameters.  This is where
+/// the real calculations happen.
+/// FIXME: Remove duplication between this and pgn.rs
+fn parse_message(
+    bit_len: usize,
+    start_bit: usize,
+    little_endian: bool,
+    scale: f32,
+    offset: f32,
+    msg: &[u8],
+) -> Option<f32> {
+    if msg.len() < 8 {
+        return None;
+    }
+    let msg64: u64 = if little_endian {
+        LittleEndian::read_u64(msg)
+    } else {
+        BigEndian::read_u64(msg)
+    };
+
+    let bit_mask: u64 = 2u64.pow(bit_len as u32) - 1;
+
+    Some((((msg64 >> start_bit) & bit_mask) as f32) * scale + offset)
 }
 
 type SignalAttribute = String;
@@ -33,6 +59,23 @@ pub struct Signal {
     value_definition: Option<dbc::ValueDefinition>,
 }
 
+
+impl Signal {
+    fn parse_message(&self, msg: &[u8]) -> Option<f32> {
+        match &self.definition {
+            Some(def) => parse_message(
+                def.bit_len,
+                def.start_bit,
+                def.little_endian,
+                def.scale,
+                def.offset,
+                msg),
+
+            None => None
+        }
+    }
+}
+
 type MessageAttribute = String;
 
 #[derive(Clone, Debug, Default)]
@@ -46,6 +89,18 @@ pub struct Message {
     /// e.g., CM_ BO_ 2364540158 "Electronic Engine Controller 1";
     description: Option<String>,
     signals: HashMap<String, Signal>,
+}
+
+impl Message {
+    pub fn parse_message(&self, msg: &[u8]) -> HashMap<String, Option<f32>> {
+        let mut map: HashMap<String, Option<f32>> = HashMap::new();
+
+        for (name, signal) in self.signals.iter() {
+            map.insert(name.to_string(), signal.parse_message(msg));
+        }
+
+        map
+    }
 }
 
 impl FromDbc for Message {
@@ -369,6 +424,10 @@ impl DbcLibrary {
 
         self.last_id = Some(_id);
         Ok(())
+    }
+
+    pub fn get_message(&self, id: u32) -> Option<&Message> {
+        self.messages.get(&id)
     }
 }
 
