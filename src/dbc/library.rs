@@ -80,7 +80,7 @@ type MessageAttribute = String;
 
 #[derive(Clone, Debug, Default)]
 pub struct Message {
-    name: String,
+    pub name: String,
     message_len: u32,
     sending_node: String,
 
@@ -306,7 +306,7 @@ impl FromDbc for Signal {
 #[derive(Clone, Debug, Default)]
 pub struct DbcLibrary {
     last_id: Option<u32>,
-    messages: HashMap<u32, Message>,
+    pub messages: HashMap<u32, Message>,
 }
 
 use encoding::all::ISO_8859_1;
