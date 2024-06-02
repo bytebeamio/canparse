@@ -11,6 +11,7 @@ pub mod library;
 pub mod parser;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use library::ParsingError;
 
 pub use self::library::DbcLibrary;
 
@@ -70,9 +71,9 @@ impl SignalDefinition {
     /// Internal function for parsing CAN message slices given the definition parameters.  This is where
     /// the real calculations happen.
     /// FIXME: Remove duplication between this and pgn.rs
-    fn parse_message(&self, msg: &[u8]) -> Option<Value> {
+    fn parse_message(&self, msg: &[u8]) -> Result<Value, ParsingError> {
         if msg.len() < 8 {
-            return None;
+            return Err(ParsingError::DataLoss);
         }
         let msg64: u64 = if self.little_endian {
             LittleEndian::read_u64(msg)
@@ -83,8 +84,16 @@ impl SignalDefinition {
         let bit_mask: u64 = 2u64.pow(self.bit_len as u32) - 1;
         let extracted = (msg64 >> self.start_bit) & bit_mask;
         let scaled = (extracted as f32) * self.scale + self.offset;
-        if scaled > self.max_value || scaled < self.min_value {
-            return None;
+        if scaled > self.max_value {
+            return Err(ParsingError::LargerValue {
+                max: self.max_value,
+                parsed: scaled,
+            });
+        } else if scaled < self.min_value {
+            return Err(ParsingError::SmallerValue {
+                min: self.min_value,
+                parsed: scaled,
+            });
         }
 
         let value = match (self.scale % 1.0, self.bit_len) {
@@ -93,7 +102,7 @@ impl SignalDefinition {
             _ => Value::Float(scaled),
         };
 
-        Some(value)
+        Ok(value)
     }
 }
 

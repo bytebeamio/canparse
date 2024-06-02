@@ -15,6 +15,14 @@ pub trait FromDbc {
     fn merge_entry(&mut self, entry: dbc::Entry) -> Result<(), Self::Err>;
 }
 
+#[derive(Debug)]
+pub enum ParsingError {
+    NotDefined,
+    DataLoss,
+    LargerValue { max: f32, parsed: f32 },
+    SmallerValue { min: f32, parsed: f32 },
+}
+
 type SignalAttribute = String;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Signal {
@@ -34,9 +42,9 @@ pub struct Signal {
 }
 
 impl Signal {
-    pub fn parse_message(&self, msg: &[u8]) -> Option<Value> {
+    pub fn parse_message(&self, msg: &[u8]) -> Result<Value, ParsingError> {
         let Some(def) = &self.definition else {
-            return None;
+            return Err(ParsingError::NotDefined);
         };
 
         def.parse_message(msg)
