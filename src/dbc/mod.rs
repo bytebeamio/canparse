@@ -10,6 +10,8 @@ use std::str::FromStr;
 pub mod library;
 pub mod parser;
 
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
+
 pub use self::library::DbcLibrary;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -43,6 +45,13 @@ pub struct MessageAttribute {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Integer(i32),
+    Float(f32),
+    Boolean(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SignalDefinition {
     pub name: String,
     pub start_bit: usize,
@@ -55,6 +64,37 @@ pub struct SignalDefinition {
     pub max_value: f32,
     pub units: String,
     pub receiving_node: String,
+}
+
+impl SignalDefinition {
+    /// Internal function for parsing CAN message slices given the definition parameters.  This is where
+    /// the real calculations happen.
+    /// FIXME: Remove duplication between this and pgn.rs
+    fn parse_message(&self, msg: &[u8]) -> Option<Value> {
+        if msg.len() < 8 {
+            return None;
+        }
+        let msg64: u64 = if self.little_endian {
+            LittleEndian::read_u64(msg)
+        } else {
+            BigEndian::read_u64(msg)
+        };
+
+        let bit_mask: u64 = 2u64.pow(self.bit_len as u32) - 1;
+        let extracted = (msg64 >> self.start_bit) & bit_mask;
+        let scaled = (extracted as f32) * self.scale + self.offset;
+        if scaled > self.max_value || scaled < self.min_value {
+            return None;
+        }
+
+        let value = match (self.scale % 1.0, self.bit_len) {
+            (0.0, 1) => Value::Boolean(extracted != 0),
+            (0.0, _) => Value::Integer(scaled as i32),
+            _ => Value::Float(scaled),
+        };
+
+        Some(value)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
